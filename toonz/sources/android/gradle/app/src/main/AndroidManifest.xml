@@ -5,19 +5,14 @@
   The application is a normal Qt application: the manifest only declares what
   the Android platform needs in addition.
 
-  Storage policy
-  --------------
+  Storage policy.
+
   The application works inside its own directories, which require no
   permission at all, and reaches every other location through the Storage
   Access Framework.  The manifest therefore declares no storage permission:
   requesting MANAGE_EXTERNAL_STORAGE or the legacy WRITE_EXTERNAL_STORAGE
   permissions would misrepresent what the application does and would be
   rejected by the store.
-
-  On Android 9 and older the SAF is used as well, so no runtime permission is
-  ever requested.  The only permission that is genuinely required is the
-  legacy read access on API < 19, which does not exist; hence no permission
-  element below for storage.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.opentoonz.android">
