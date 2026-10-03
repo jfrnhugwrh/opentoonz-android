@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher icon.
+
+  A vector drawable keeps the icon in the repository as source rather than as a
+  set of binary bitmaps: OpenToonz is drawn from a single pen stroke, and the
+  platform scales vector icons itself on API 24 and later.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#1E1E1E"
+        android:pathData="M0,0h108v108h-108z" />
+
+    <!-- The pen stroke, drawn as a tapered ribbon -->
+    <path
+        android:fillColor="#E8E8E8"
+        android:pathData="M30,82 C42,72 48,58 54,44 C60,30 68,24 78,26 C70,34 64,46 58,58 C52,70 44,78 30,82 Z" />
+
+    <!-- The ink dot the stroke ends in -->
+    <path
+        android:fillColor="#D98D43"
+        android:pathData="M28,82 a5,5 0 1,0 0.01,0 z" />
+
+    <!-- Frame marker: the "level" the stroke belongs to -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#5A5A5A"
+        android:strokeWidth="2"
+        android:pathData="M16,16 h76 v76 h-76 z" />
+</vector>
