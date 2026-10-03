@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Directories the sharing provider may hand out.
+
+  Only the application's own storage is exposed: the shared storage is reached
+  through the Storage Access Framework, whose URIs carry their own grants.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+    <external-files-path name="external_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+</paths>

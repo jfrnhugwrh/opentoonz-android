@@ -2283,8 +2283,13 @@ void MainWindow::defineActions() {
                        "run_script");
   createMenuFileAction("MI_OpenScriptConsole",
                        QT_TR_NOOP("Open Script Console..."), "", "console");
+#ifndef ANDROID
+  // Qt Print Support does not exist on Android: the command is not registered
+  // rather than being registered without a handler.  The PDF export - which
+  // covers the same need and does not depend on the platform - is unaffected.
   createMenuFileAction(MI_Print, QT_TR_NOOP("&Print Current Frame..."),
                        "Ctrl+P", "printer");
+#endif
   createMenuFileAction(MI_Quit, QT_TR_NOOP("&Quit"), "Ctrl+Q", "quit");
 #ifndef NDEBUG
   createMenuFileAction("MI_ReloadStyle", QT_TR_NOOP("Reload qss"), "");

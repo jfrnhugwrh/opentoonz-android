@@ -22,7 +22,9 @@
 #include <stdlib.h>
 #endif
 
-#if defined(LINUX) || defined(FREEBSD) || defined(__sgi)
+#if (defined(LINUX) || defined(FREEBSD) || defined(__sgi)) && !defined(ANDROID)
+// GLX is the X11 binding of OpenGL: Android uses EGL and the framebuffer
+// object implementation in tvrender instead.
 #include <GL/glx.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>

@@ -1,0 +1,16 @@
+// Values shared by the root and module build files.  They are kept here so
+// that the command line build (see the GitHub Actions workflow) and an IDE
+// build use exactly the same API levels.
+ext {
+    // Qt 5.15 for Android targets the API level 31 platform; 33 is the
+    // newest platform the current tooling supports reliably.
+    compileSdkVersion = 33
+    // OpenToonz needs OpenGL ES 3.0, which is API 18 and later, plus the
+    // Storage Access Framework conveniences introduced in API 21.
+    minSdkVersion = 24
+    targetSdkVersion = 33
+    versionCode = 1
+    versionName = '1.0.0'
+    // The Qt 5.15 Android kits ship these ABIs.
+    abiFilters = 'arm64-v8a,armeabi-v7a,x86_64'
+}

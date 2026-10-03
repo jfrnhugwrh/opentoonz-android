@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OpenToonz for Android.
+
+  The application is a normal Qt application: the manifest only declares what
+  the Android platform needs in addition.
+
+  Storage policy
+  --------------
+  The application works inside its own directories, which require no
+  permission at all, and reaches every other location through the Storage
+  Access Framework.  The manifest therefore declares no storage permission:
+  requesting MANAGE_EXTERNAL_STORAGE or the legacy WRITE_EXTERNAL_STORAGE
+  permissions would misrepresent what the application does and would be
+  rejected by the store.
+
+  On Android 9 and older the SAF is used as well, so no runtime permission is
+  ever requested.  The only permission that is genuinely required is the
+  legacy read access on API < 19, which does not exist; hence no permission
+  element below for storage.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.opentoonz.android">
+
+    <!-- Needed to open links from the Help menu. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Stop motion capture from the built in camera. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+
+    <!-- Tablet / stylus friendly: the application is fully usable with touch. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen.multitouch" android:required="false" />
+    <supports-screens
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="false"
+        android:requiresSmallestWidthDp="480" />
+
+    <application
+        android:label="OpenToonz"
+        android:icon="@mipmap/ic_launcher"
+        android:hardwareAccelerated="true"
+        android:largeHeap="true"
+        android:allowBackup="true"
+        android:requestLegacyExternalStorage="false"
+        android:preserveLegacyExternalStorage="false"
+        android:theme="@style/OpenToonzTheme">
+
+        <activity
+            android:name="io.github.opentoonz.android.OpenToonzActivity"
+            android:label="OpenToonz"
+            android:launchMode="singleTask"
+            android:screenOrientation="fullSensor"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|smallestScreenSize"
+            android:windowSoftInputMode="adjustResize"
+            android:resizeableActivity="true"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- OpenToonz scenes and levels can be opened from any file
+                 manager.  The content is staged through the SAF and handed to
+                 the scene loader. -->
+            <intent-filter android:label="Open with OpenToonz">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/x-opentoonz-scene" />
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+
+            <meta-data android:name="android.app.lib_name"
+                android:value="OpenToonz" />
+        </activity>
+
+        <!-- Serves files from the application directories to other
+             applications (sharing, "open with"). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Keeps the process alive long enough to finish a queued render. -->
+        <service
+            android:name="org.qtproject.qt5.android.bindings.QtService"
+            android:exported="false" />
+    </application>
+</manifest>

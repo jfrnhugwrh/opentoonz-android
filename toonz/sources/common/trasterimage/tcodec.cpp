@@ -567,6 +567,66 @@ void TRasterCodecLz4::decompress(const TRasterP &compressedRas,
 //	TRasterCodecLZO
 //------------------------------------------------------------------------------
 
+#ifdef ANDROID
+//=============================================================================
+//  LZO codec - Android
+//
+//  The desktop builds shell out to the lzocompress / lzodecompress helper
+//  binaries.  Android packages contain a single native entry point and cannot
+//  spawn helper executables, so the very same functions those helpers call
+//  (lzo1x_1_compress / lzo1x_decompress_safe, from minilzo) are invoked in
+//  process here.  The compressed stream - and therefore every .tzu level
+//  written by the portable or desktop builds - is unchanged.
+//=============================================================================
+
+extern "C" {
+#include "minilzo.h"
+}
+
+namespace {
+
+bool lzoCompress(const QByteArray src, QByteArray &dst) {
+  if (lzo_init() != LZO_E_OK) return false;
+
+  const lzo_uint srcLen     = static_cast<lzo_uint>(src.size());
+  const lzo_uint maxDstLen  = srcLen + srcLen / 64 + 16 + 3;
+
+  QByteArray out(static_cast<int>(maxDstLen), 0);
+  lzo_uint dstLen = maxDstLen;
+
+  QByteArray work(LZO1X_1_MEM_COMPRESS, 0);
+
+  const int rc = lzo1x_1_compress(
+      reinterpret_cast<const lzo_bytep>(src.constData()), srcLen,
+      reinterpret_cast<lzo_bytep>(out.data()), &dstLen,
+      reinterpret_cast<lzo_bytep>(work.data()));
+  if (rc != LZO_E_OK) return false;
+
+  out.resize(static_cast<int>(dstLen));
+  dst = out;
+  return true;
+}
+
+bool lzoDecompress(const QByteArray src, int dstSize, QByteArray &dst) {
+  if (lzo_init() != LZO_E_OK) return false;
+
+  QByteArray out(dstSize, 0);
+  lzo_uint outLen = static_cast<lzo_uint>(dstSize);
+
+  const int rc = lzo1x_decompress_safe(
+      reinterpret_cast<const lzo_bytep>(src.constData()),
+      static_cast<lzo_uint>(src.size()), reinterpret_cast<lzo_bytep>(out.data()),
+      &outLen, nullptr);
+  if (rc != LZO_E_OK || outLen != static_cast<lzo_uint>(dstSize)) return false;
+
+  dst = out;
+  return true;
+}
+
+}  // namespace
+
+#else
+
 namespace {
 
 bool lzoCompress(const QByteArray src, QByteArray &dst) {
@@ -614,6 +674,8 @@ bool lzoDecompress(const QByteArray src, int dstSize, QByteArray &dst) {
   return process.exitCode() == 0 && dst.size() == dstSize;
 }
 }  // namespace
+
+#endif  // !ANDROID
 
 //------------------------------------------------------------------------------
 

@@ -409,7 +409,7 @@ set(SOURCES
     predict3d.cpp
 )
 
-if(PLATFORM EQUAL 64)
+if(PLATFORM EQUAL 64 AND NOT BUILD_TARGET_ANDROID)
     set(SOURCES
         ${SOURCES}
         ../stopmotion/stopmotion.cpp
@@ -425,6 +425,10 @@ if(PLATFORM EQUAL 64)
         xshbreadcrumbs.cpp
     )
 else()
+    # Android (and the 32 bit desktop builds) use the Qt only capture path: the
+    # camera is reached through Qt Multimedia instead of the Canon SDK, libusb
+    # and OpenCV, which is the supported way on the platform and keeps the same
+    # capture workflow and the same levels.
     set(SOURCES
         ${SOURCES}
         cameracapturelevelcontrol_qt.cpp
@@ -433,6 +437,34 @@ else()
         xshbreadcrumbs.cpp
     )
 endif()
+
+if(BUILD_TARGET_ANDROID)
+    # Android has no printer support in Qt: the "Print" command is built out.
+    # Every other export path - including the PDF export - is unchanged.
+    list(REMOVE_ITEM SOURCES print.cpp)
+endif()
+
+if(BUILD_TARGET_ANDROID)
+    # Touch oriented user interface; only built for Android.
+    set(MOC_HEADERS
+        ${MOC_HEADERS}
+        androidtouchpanel.h
+        androidcommandbar.h
+    )
+    set(HEADERS
+        ${HEADERS}
+        androidtouchpanel.h
+        androidcommandbar.h
+        androidsceneviewgestures.h
+    )
+    set(SOURCES
+        ${SOURCES}
+        androidtouchpanel.cpp
+        androidcommandbar.cpp
+        androidsceneviewgestures.cpp
+    )
+endif()
+
 
 
 set(OBJCSOURCES filebrowsermodel.cpp)
@@ -453,7 +485,19 @@ endif()
 
 qt5_wrap_cpp(SOURCES ${MOC_HEADERS})
 
-if(BUILD_ENV_MSVC)
+if(BUILD_TARGET_ANDROID)
+    # A Qt for Android application is packaged as a single shared library which
+    # the activity loads.  The manifest names it (android.app.lib_name) and the
+    # same library is what Gradle ships in lib/<abi>/.
+    add_library(OpenToonz SHARED ${HEADERS} ${SOURCES} ${RESOURCES})
+    set_target_properties(OpenToonz PROPERTIES
+        OUTPUT_NAME "OpenToonz"
+        PREFIX "lib"
+        SUFFIX ".so"
+    )
+    add_dependencies(OpenToonz tnzcore tnzbase toonzlib colorfx tnzext image sound toonzqt tnztools tnzstdfx tfarm
+                     ot_gl_compat ot_android_platform)
+elseif(BUILD_ENV_MSVC)
     add_executable(OpenToonz WIN32 ${HEADERS} ${SOURCES} ${OBJCSOURCES} ${RESOURCES} ${RC_FILE})
 else()
     set(MACOSX_BUNDLE_ICON_FILE "OpenToonz.icns")
@@ -518,7 +562,35 @@ if(BUILD_TARGET_WIN)
     endif()
 endif()
 
-if(BUILD_ENV_MSVC)
+if(BUILD_TARGET_ANDROID)
+    # -----------------------------------------------------------------------
+    # Android: Qt for Android, the OpenGL ES compatibility layer, the platform
+    # services and the bundled third party libraries.  GL, GLU, GLUT, GLEW and
+    # OpenCV are desktop only and are replaced as documented in
+    # android/CMakeLists.txt.
+    # -----------------------------------------------------------------------
+    _find_toonz_library(EXTRA_LIBS "tnzcore;tnzbase;toonzlib;colorfx;tnzext;image;sound;toonzqt;tnztools")
+
+    set(EXTRA_LIBS ${EXTRA_LIBS}
+        "$<TARGET_FILE:tnzstdfx>"
+        "$<TARGET_FILE:tfarm>"
+        ${Boost_LIBRARIES}
+        ot_gl_compat
+        ot_android_platform
+        ${OT_TP_LIBRARIES}
+    )
+
+    target_include_directories(OpenToonz PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/../android/platform
+    )
+
+    target_link_libraries(OpenToonz
+        Qt5::Core Qt5::Gui Qt5::Network Qt5::OpenGL Qt5::Svg Qt5::Xml
+        Qt5::Script Qt5::Widgets Qt5::Multimedia Qt5::MultimediaWidgets Qt5::UiTools
+        ${EXTRA_LIBS}
+    )
+
+elseif(BUILD_ENV_MSVC)
     set(EXTRA_LIBS)
     if(CMAKE_CXX_FLAGS_DEBUG)
         target_compile_options(OpenToonz PRIVATE /EHsc) # Enable C++ Exceptions in Debug Mode.

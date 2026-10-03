@@ -26,6 +26,14 @@ if(WIN32)
 elseif(APPLE)
     set(BUILD_TARGET_APPLE  ON)
     message(STATUS "Target system is APPLE")
+elseif(ANDROID)
+    # Android is a UNIX system as far as CMake is concerned, but it is not a
+    # desktop Unix: keep both flags so that the POSIX code paths are reused
+    # while the desktop specific ones (X11, GLX, helper executables) can be
+    # told apart.
+    set(BUILD_TARGET_UNIX    ON)
+    set(BUILD_TARGET_ANDROID ON)
+    message(STATUS "Target system is ANDROID")
 elseif(UNIX)
     set(BUILD_TARGET_UNIX   ON)
     message(STATUS "Target system is UNIX")
@@ -97,6 +105,12 @@ elseif(BUILD_ENV_APPLE)
 elseif(BUILD_ENV_UNIXLIKE)
     set(_init_SYSTEM_LZO                     ON)
     set(_init_SYSTEM_SUPERLU                 ON)
+    if(BUILD_TARGET_ANDROID)
+        # There is no system copy of these libraries on Android: the bundled
+        # sources are always used.
+        set(_init_SYSTEM_LZO                 OFF)
+        set(_init_SYSTEM_SUPERLU             OFF)
+    endif()
 endif()
 
 
@@ -106,7 +120,14 @@ endif()
 option(WITH_SYSTEM_LZO "Use the system LZO library instead of 'thirdparty'" ${_init_SYSTEM_LZO})
 option(WITH_SYSTEM_SUPERLU "Use the system SuperLU library instead of 'thirdparty'" ${_init_SYSTEM_SUPERLU})
 option(WITH_CANON "Build with Canon DSLR support - Requires Canon SDK" OFF)
-option(WITH_TRANSLATION "Generate translation projects as well" ON)
+if(BUILD_TARGET_ANDROID)
+    # Qt for Android kits do not always ship the Linguist host tools
+    # (lrelease); translations can be enabled explicitly when they do.
+    set(_init_WITH_TRANSLATION OFF)
+else()
+    set(_init_WITH_TRANSLATION ON)
+endif()
+option(WITH_TRANSLATION "Generate translation projects as well" ${_init_WITH_TRANSLATION})
 option(WITH_WINTAB "(Windows only) Build with customized Qt with WinTab support. https://github.com/shun-iwasawa/qt5/releases/tag/v5.15.2_wintab" OFF)
 
 # avoid using again
@@ -225,6 +246,19 @@ elseif(BUILD_ENV_APPLE)
     else()
         message(FATAL_ERROR "Invalid PLATFORM:" ${PLATFORM} ". 'PLATFORM' must be 32 or 64.")
     endif()
+elseif(BUILD_TARGET_ANDROID)
+    # Android: the POSIX code paths of the core are reused (Android is Linux),
+    # and ANDROID marks the places where the platform differs.
+    add_definitions(-DLINUX -DANDROID)
+    set(PRELOAD_VARIABLE "LD_LIBRARY_PATH")
+
+    # Nothing on the device has a package manager, a trash can or helper
+    # executables, so those subsystems are compiled out.
+    set(OT_ANDROID_BUILD ON)
+
+    find_package(Qt5Widgets)
+
+    set(CMAKE_CXX_STANDARD 17)
 elseif(BUILD_ENV_UNIXLIKE)
     # Needed for correct Qt detection (handled by top-level 3.5+)
     # cmake_minimum_required(VERSION 2.8.12)  # Redundant and triggers <3.5 error
@@ -281,7 +315,7 @@ include_directories(
   )
 
 # Find the QtWidgets library
-find_package(Qt5 REQUIRED
+set(OT_QT_MODULES
     Core
     Gui
     Network
@@ -290,13 +324,20 @@ find_package(Qt5 REQUIRED
     Xml
     Script
     Widgets
-    PrintSupport
     LinguistTools
     Multimedia
     MultimediaWidgets
-    SerialPort
     UiTools
   )
+
+if(NOT BUILD_TARGET_ANDROID)
+    # Qt for Android does not build the serial port module (the serial driven
+    # stop motion head is a desktop peripheral) nor Qt Print Support.
+    list(APPEND OT_QT_MODULES SerialPort)
+    list(APPEND OT_QT_MODULES PrintSupport)
+endif()
+
+find_package(Qt5 REQUIRED ${OT_QT_MODULES})
 
 if(NOT Qt5Core_FOUND)
     message(FATAL_ERROR "Qt5Core not found check paths")
@@ -468,6 +509,49 @@ elseif(BUILD_ENV_APPLE)
         endif()
     endif()
 
+elseif(BUILD_TARGET_ANDROID)
+    # -----------------------------------------------------------------------
+    # Android: every library is compiled from the bundled sources (see
+    # android_thirdparty.cmake) and the OpenGL entry points are supplied by
+    # the compatibility layer instead of a system GL.
+    # -----------------------------------------------------------------------
+    # The two support directories are needed by every module: the GL shim
+    # supplies <GL/gl.h>, <GL/glu.h>, <GL/glut.h> and <GL/glew.h>, and the
+    # platform layer supplies the storage services.
+    set(OT_GL_COMPAT_DIR ${CMAKE_CURRENT_LIST_DIR}/android/gl_compat)
+    set(OT_PLATFORM_DIR  ${CMAKE_CURRENT_LIST_DIR}/android/platform)
+
+    include(${CMAKE_CURRENT_LIST_DIR}/android/android_thirdparty.cmake)
+
+    include_directories(
+        ${OT_PLATFORM_DIR}
+        ${OT_GL_COMPAT_DIR}/include
+    )
+    include_directories(SYSTEM ${OT_TP_INCLUDE_DIRS})
+
+    # There is no desktop GL, GLU, GLUT or GLEW on Android: the shim provides
+    # them, so nothing is linked here.
+    set(GL_LIB "")
+    set(GLU_LIB "")
+    set(GLUT_LIB "")
+    set(GLEW_LIB "")
+    # Tell the modules that <GL/glew.h> is available (the shim header), so that
+    # the shader based effects are compiled in.
+    set(GLEW_FOUND TRUE)
+    set(GLEW_INCLUDE_DIRS ${OT_GL_COMPAT_DIR}/include)
+
+    # Qt for Android has no QtSerialPort: the serial driven stop motion head
+    # is a desktop peripheral and is replaced by the camera capture path.
+    set(OT_NO_SERIALPORT ON)
+
+    set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
+    find_library(PTHREAD_LIBRARY pthread)
+
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/android android)
+
 elseif(BUILD_ENV_UNIXLIKE)
     if(BUILD_TARGET_WIN)
         find_library(GL_LIB opengl32)
@@ -604,6 +688,28 @@ if(BUILD_ENV_MSVC OR BUILD_ENV_APPLE)
                 boost/boost_1_72_0/
       )
     find_package(Boost 1.55 REQUIRED)
+elseif(BUILD_TARGET_ANDROID)
+    # Boost is used header only by OpenToonz (containers, iterators, graphs and
+    # xpressive).  Android has no system copy, so an explicit BOOST_ROOT is
+    # honoured first and the official release archive is fetched otherwise.
+    find_package(Boost 1.55 QUIET)
+    if(NOT Boost_FOUND)
+        include(FetchContent)
+        if(NOT DEFINED OT_BOOST_VERSION)
+            set(OT_BOOST_VERSION 1.85.0)
+        endif()
+        string(REPLACE "." "_" OT_BOOST_TAG ${OT_BOOST_VERSION})
+        message(STATUS "Android: fetching Boost ${OT_BOOST_VERSION} headers")
+        FetchContent_Declare(ot_boost
+            URL https://github.com/boostorg/boost/releases/download/boost-${OT_BOOST_VERSION}/boost-${OT_BOOST_VERSION}-cmake.tar.gz
+            URL_HASH ""
+        )
+        FetchContent_MakeAvailable(ot_boost)
+        # The release archive extracts with the header tree at its top level,
+        # so <boost/...> resolves against that directory.
+        set(Boost_INCLUDE_DIR ${ot_boost_SOURCE_DIR})
+        set(Boost_FOUND TRUE)
+    endif()
 else()
     find_package(Boost)
 endif()
@@ -618,8 +724,15 @@ include_directories(
     ${MYPAINT_LIB_INCLUDE_DIRS}
   )
 
-if(PLATFORM EQUAL 64)
+if(PLATFORM EQUAL 64 AND NOT BUILD_TARGET_ANDROID)
+    # "x64" selects the 64-bit Windows specific code paths (Canon SDK, the
+    # turbojpeg based stop motion capture, ...).  Android 64-bit targets are
+    # not Windows, so the define is deliberately not set for them.
     add_definitions(-Dx64)
+endif()
+
+if(BUILD_TARGET_ANDROID AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_definitions(-DANDROID_64)
 endif()
 
 if(BUILD_ENV_MSVC)
@@ -736,6 +849,8 @@ endif()
 set(CMAKE_C_FLAGS "${C_WARNINGS} ${CMAKE_C_FLAGS}")
 set(CMAKE_CXX_FLAGS "${CXX_WARNINGS} ${CMAKE_CXX_FLAGS}")
 
+# Modules shared by every platform: the whole application logic, the rendering
+# core, the tools and the user interface.
 add_subdirectory(tnzcore)
 add_subdirectory(tnzbase)
 add_subdirectory(tnzext)
@@ -748,13 +863,25 @@ add_subdirectory(image)
 add_subdirectory(toonzqt)
 add_subdirectory(tnztools)
 
-add_subdirectory(${SDKROOT}/lzo/driver lzodriver)
+if(BUILD_TARGET_ANDROID)
+    # -----------------------------------------------------------------------
+    # Android: the application itself is the only artifact.  The batch tools,
+    # the render farm and the LZO helper executables are desktop only - an APK
+    # contains exactly one native entry point and cannot spawn helper binaries,
+    # so the functionality they provide is linked in instead (see
+    # tcodec.cpp for the LZO codec and the batch rendering commands for the
+    # farm).
+    # -----------------------------------------------------------------------
+    add_subdirectory(toonz)
+else()
+    add_subdirectory(${SDKROOT}/lzo/driver lzodriver)
 
-add_subdirectory(toonz)
-add_subdirectory(tcleanupper)
-add_subdirectory(tcomposer)
-add_subdirectory(tconverter)
-add_subdirectory(toonzfarm)
+    add_subdirectory(toonz)
+    add_subdirectory(tcleanupper)
+    add_subdirectory(tcomposer)
+    add_subdirectory(tconverter)
+    add_subdirectory(toonzfarm)
+endif()
 
 if(BUILD_TARGET_WIN)
     add_subdirectory(toonzpreview)
@@ -768,6 +895,6 @@ if((PLATFORM EQUAL 32) AND ((BUILD_TARGET_WIN AND BUILD_ENV_MSVC) OR BUILD_TARGE
     add_subdirectory(t32bitsrv)
 endif()
 
-if(BUILD_ENV_UNIXLIKE AND NOT BUILD_TARGET_WIN)
+if(BUILD_ENV_UNIXLIKE AND NOT BUILD_TARGET_WIN AND NOT BUILD_TARGET_ANDROID)
     add_subdirectory(xdg-data)
 endif()

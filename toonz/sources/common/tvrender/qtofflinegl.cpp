@@ -125,6 +125,10 @@ void QtOfflineGL::createContext(TDimension rasterSize,
 
 */
 
+  // The Qt4 style QGLFormat only selects the desktop pixel format; on Android
+  // the ES surface format is configured below through QSurfaceFormat, which is
+  // the supported API there.
+#ifndef ANDROID
   QGLFormat fmt;
 
 #if defined(_WIN32)
@@ -233,8 +237,12 @@ void QtOfflineGL::getRaster(TRaster32P raster) {
 // QGLPixelBuffer::hasOpenGLPbuffers() (statica) -> true se la scheda supporta i
 // PBuffer
 
+#if !defined(ANDROID)
 //=============================================================================
 // QtOfflineGLPBuffer : implem. offlineGL usando QT e PBuffer
+//
+// PBuffers do not exist in OpenGL ES; the framebuffer object implementation is
+// used instead, so this class is only built for the desktop targets.
 //-----------------------------------------------------------------------------
 
 QtOfflineGLPBuffer::QtOfflineGLPBuffer(TDimension rasterSize)
@@ -309,7 +317,8 @@ SPECIFICHE  MAC = depth_size 24, stencil_size 8, alpha_size 1
   fmt.setStencil(true);
   fmt.setAccum(false);
   fmt.setPlane(0);
-#endif
+#endif  // pixel format selection
+#endif  // !ANDROID
 
   // Il PixelBuffer deve essere con width ed height potenze di 2
 
@@ -372,3 +381,5 @@ void QtOfflineGLPBuffer::getRaster(TRaster32P raster) {
   }
   raster->unlock();
 }
+
+#endif  // !ANDROID

@@ -35,6 +35,17 @@
 #include <winnt.h>
 #endif
 
+#ifdef ANDROID
+#include "otandroid.h"
+
+//! True when the path denotes a document reached through the Storage Access
+//! Framework.  The synthetic tree those documents are mapped into never exists
+//! on disk, so every file operation has to be routed through the bridge.
+static inline bool isSafPath(const TFilePath &path) {
+  return otandroid::isAvailable() && otandroid::saf::isSafPath(path);
+}
+#endif
+
 namespace {
 
 inline QString toQString(const TFilePath &path) {
@@ -54,6 +65,16 @@ TFileStatus::TFileStatus(const TFilePath &path)
 // tenv.cpp, tcontenthistory.cpp, etc. to create QCoreApplication first.
 // Workaround avoids crashes.
 {
+#ifdef ANDROID
+  // Documents reached through the Storage Access Framework are not visible to
+  // QFileInfo: their existence has to be asked to the platform layer.
+  if (isSafPath(path)) {
+    m_isDir = otandroid::saf::isDirectory(path);
+    m_exist = m_isDir || otandroid::saf::exists(path);
+    markSaf(m_isDir);
+    return;
+  }
+#endif
   if (QCoreApplication::instance() == nullptr) {
     return;  // avoids premature exists() doesn't crash during static
              // initialization
@@ -114,6 +135,9 @@ QFile::Permissions TFileStatus::getPermissions() const {
 
 bool TFileStatus::isDirectory() const {
   if (!m_exist) return 0;
+#ifdef ANDROID
+  if (m_isSaf) return m_isDir;
+#endif
   return m_fileInfo.isDir();
 }
 
@@ -176,6 +200,11 @@ QString TSystem::getUserName() {
 //------------------------------------------------------------
 
 TFilePath TSystem::getTempDir() {
+#ifdef ANDROID
+  // Library scratch data has to stay in the application cache: /tmp is not
+  // writable and is not cleaned up per application.
+  if (otandroid::isAvailable()) return otandroid::getCacheRoot();
+#endif
   return TFilePath(QDir::tempPath().toStdString());
 }
 
@@ -257,6 +286,13 @@ void setPathsPermissions(const TFilePathSet &pathSet,
 
 // handle exception
 void TSystem::mkDir(const TFilePath &path) {
+#ifdef ANDROID
+  if (isSafPath(path)) {
+    if (!otandroid::saf::createDirectory(path))
+      throw TSystemException(path, "can't create folder!");
+    return;
+  }
+#endif
   TFilePathSet pathSet = getPathsToCreate(path);
   QString qPath        = toQString(path);
 
@@ -276,6 +312,13 @@ void TSystem::mkDir(const TFilePath &path) {
 //------------------------------------------------------------
 // handle exception
 void TSystem::rmDir(const TFilePath &path) {
+#ifdef ANDROID
+  if (isSafPath(path)) {
+    if (!otandroid::saf::remove(path, false))
+      throw TSystemException(path, "can't remove folder!");
+    return;
+  }
+#endif
   if (!QDir(toQString(path.getParentDir()))
            .rmdir(QString::fromStdString(path.getName())))
     throw TSystemException(path, "can't remove folder!");
@@ -306,7 +349,16 @@ void rmDirTree(const QString &path) {
 
 //------------------------------------------------------------
 
-void TSystem::rmDirTree(const TFilePath &path) { ::rmDirTree(toQString(path)); }
+void TSystem::rmDirTree(const TFilePath &path) {
+#ifdef ANDROID
+  if (isSafPath(path)) {
+    if (!otandroid::saf::remove(path, true))
+      throw TSystemException(path, "can't remove path!");
+    return;
+  }
+#endif
+  ::rmDirTree(toQString(path));
+}
 
 //------------------------------------------------------------
 
@@ -423,6 +475,29 @@ void TSystem::copyFile(const TFilePath &dst, const TFilePath &src,
 
   if (dst == src) return;
 
+#ifdef ANDROID
+  // Copying between the application storage and a document reached through
+  // the Storage Access Framework is a stream copy on the platform side.
+  if (isSafPath(dst) || isSafPath(src)) {
+    if (isSafPath(dst) && isSafPath(src)) {
+      TFilePath local = otandroid::saf::materialize(src);
+      if (local.isEmpty() || !otandroid::saf::store(dst, local))
+        throw TSystemException(dst, "can't copy file!");
+      return;
+    }
+    if (isSafPath(dst)) {
+      if (!otandroid::saf::store(dst, src))
+        throw TSystemException(dst, "can't copy file!");
+      return;
+    }
+    TFilePath local = otandroid::saf::materialize(src);
+    if (local.isEmpty())
+      throw TSystemException(src, "can't read the source document!");
+    TSystem::copyFile(dst, local, overwrite);
+    return;
+  }
+#endif
+
   // Create the containing folder before trying to copy or it will crash!
   touchParentDir(dst);
 
@@ -445,6 +520,14 @@ void TSystem::renameFile(const TFilePath &dst, const TFilePath &src,
   }
 
   if (dst == src) return;
+
+#ifdef ANDROID
+  if (isSafPath(dst) || isSafPath(src)) {
+    if (!otandroid::saf::rename(src, dst))
+      throw TSystemException(dst, "can't rename file!");
+    return;
+  }
+#endif
 
   const QString &qDst = toQString(dst);
   if (overwrite && QFile::exists(qDst)) {
@@ -483,6 +566,13 @@ void TSystem::replaceFile(const TFilePath &dst,
 
 // handle errors with GetLastError?
 void TSystem::deleteFile(const TFilePath &fp) {
+#ifdef ANDROID
+  if (isSafPath(fp)) {
+    if (!otandroid::saf::remove(fp, false))
+      throw TSystemException(fp, "can't delete file!");
+    return;
+  }
+#endif
   if (!QFile::remove(toQString(fp)))
     throw TSystemException(fp, "can't delete file!");
 }
@@ -490,6 +580,13 @@ void TSystem::deleteFile(const TFilePath &fp) {
 //------------------------------------------------------------
 
 void TSystem::hideFile(const TFilePath &fp) {
+#ifdef ANDROID
+  // Documents in shared storage have no hidden attribute; renaming the file
+  // with a leading dot - what the other Unix platforms do - is not possible
+  // through the Storage Access Framework either, so the operation is a no-op
+  // for shared documents and the POSIX rename for application storage.
+  if (isSafPath(fp)) return;
+#endif
 #ifdef _WIN32
   if (!SetFileAttributesW(fp.getWideString().c_str(), FILE_ATTRIBUTE_HIDDEN))
     throw TSystemException(fp, "can't hide file!");
@@ -549,6 +646,17 @@ void TSystem::readDirectory_Dir_ReadExe(TFilePathSet &dst,
 // return the folder item list which is readable and executable
 // (returns only names, not full path)
 void TSystem::readDirectory_DirItems(QStringList &dst, const TFilePath &path) {
+#ifdef ANDROID
+  if (isSafPath(path)) {
+    if (!otandroid::saf::isDirectory(path))
+      throw TSystemException(path, " is not a directory");
+    std::vector<std::wstring> dirs, files;
+    otandroid::saf::listDirectory(path, dirs, files);
+    for (size_t i = 0; i < dirs.size(); ++i)
+      dst.push_back(QString::fromStdWString(dirs[i]));
+    return;
+  }
+#endif
   if (!TFileStatus(path).isDirectory())
     throw TSystemException(path, " is not a directory");
 
@@ -753,6 +861,30 @@ void TSystem::readDirectory(TFilePathSet &dst, const QDir &dir,
 void TSystem::readDirectory(TFilePathSet &dst, const TFilePath &path,
                             bool groupFrames, bool onlyFiles,
                             bool getHiddenFiles) {
+#ifdef ANDROID
+  if (isSafPath(path)) {
+    if (!otandroid::saf::isDirectory(path))
+      throw TSystemException(path, " is not a directory");
+
+    std::vector<std::wstring> dirs, files;
+    if (!otandroid::saf::listDirectory(path, dirs, files))
+      throw TSystemException(path, "cannot list the directory");
+
+    std::set<TFilePath, CaselessFilepathLess> fpSet;
+    if (!onlyFiles)
+      for (size_t i = 0; i < dirs.size(); ++i)
+        fpSet.insert(path + TFilePath(dirs[i]));
+    for (size_t i = 0; i < files.size(); ++i) {
+      TFilePath child(path + TFilePath(files[i]));
+      // Sequential files are grouped into a single level, exactly as the
+      // desktop implementation does.
+      if (groupFrames && child.getDots() == "..") child = child.withFrame();
+      fpSet.insert(child);
+    }
+    dst.insert(dst.end(), fpSet.begin(), fpSet.end());
+    return;
+  }
+#endif
   QDir dir(toQString(path));
 
   QDir::Filters filters(QDir::Files);
@@ -863,6 +995,21 @@ TFilePathSet TSystem::packLevelNames(const TFilePathSet &fps) {
 
 TFilePathSet TSystem::getDisks() {
   TFilePathSet filePathSet;
+#ifdef ANDROID
+  // Android has a single file system root, and the application may only open
+  // paths inside its own directories.  What the user can actually browse is
+  // therefore reported instead: the application storage and the shared
+  // storage trees the user has granted access to.
+  if (otandroid::isAvailable()) {
+    filePathSet.push_back(otandroid::getInternalRoot());
+    const std::vector<otandroid::saf::TreeInfo> trees = otandroid::saf::trees();
+    for (size_t i = 0; i < trees.size(); ++i) {
+      filePathSet.push_back(otandroid::saf::root() +
+                            TFilePath(std::to_wstring(trees[i].id)));
+    }
+    return filePathSet;
+  }
+#endif
   QFileInfoList fil = QDir::drives();
   for (const QFileInfo &fi : fil)
     filePathSet.push_back(TFilePath(fi.filePath().toStdWString()));
@@ -1146,6 +1293,12 @@ bool TSystem::touchParentDir(const TFilePath &fp) {
 //--------------------------------------------------------------
 
 bool TSystem::showDocument(const TFilePath &path) {
+#ifdef ANDROID
+  // Documents are opened through the system handlers instead of a desktop
+  // application, which is what ACTION_VIEW does.
+  if (otandroid::isAvailable() && otandroid::openDocument(path)) return true;
+  return false;
+#endif
 #ifdef _WIN32
   HINSTANCE ret = ShellExecuteW(0, L"open", path.getWideString().c_str(), 0, 0,
                                 SW_SHOWNORMAL);

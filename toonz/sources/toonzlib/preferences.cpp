@@ -413,7 +413,14 @@ void Preferences::definePreferenceItems() {
   define(oldCameraUnits, "oldCameraUnits", QMetaType::QString, "inch");
   define(linearUnits, "linearUnits", QMetaType::QString, "mm");
   define(cameraUnits, "cameraUnits", QMetaType::QString, "inch");
+#ifdef ANDROID
+  // A room layout designed for a touch screen and a small display is the
+  // starting point on Android; the desktop layouts - which assume a wide
+  // window and a mouse - remain available in the preferences.
+  define(CurrentRoomChoice, "CurrentRoomChoice", QMetaType::QString, "Android");
+#else
   define(CurrentRoomChoice, "CurrentRoomChoice", QMetaType::QString, "Default");
+#endif
   define(functionEditorToggle, "functionEditorToggle", QMetaType::Int,
          static_cast<int>(ShowGraphEditorInPopup));
   define(moveCurrentFrameByClickCellArea, "moveCurrentFrameByClickCellArea",
@@ -1095,6 +1102,27 @@ QString Preferences::getCurrentStyleSheet() const {
   if (!additionalSheetStr.isEmpty()) {
     styleSheetStr += additionalSheetStr;
   }
+
+#ifdef ANDROID
+  // Android always layers the touch oriented metrics on top of the selected
+  // colour scheme: the desktop sheets size their controls for a mouse, which
+  // is below the minimum a finger can hit reliably (see
+  // stuff/config/qss/Android/android.qss).
+  {
+    QFile touchSheet(
+        TEnv::getStuffDir() +
+        TFilePath("config/qss/Android/android.qss").getQString());
+    // Fall back to the path relative to the selected scheme folder, which is
+    // where the stylesheets are read from.
+    if (!touchSheet.exists()) {
+      touchSheet.setFileName(path.getQString() + "/../Android/android.qss");
+    }
+    if (touchSheet.open(QFile::ReadOnly | QFile::Text)) {
+      QTextStream touchStream(&touchSheet);
+      styleSheetStr += touchStream.readAll();
+    }
+  }
+#endif
 
   // Fix relative paths in stylesheets
   QString currentStyleFolderPath =

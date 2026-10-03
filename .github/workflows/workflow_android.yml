@@ -1,0 +1,268 @@
+# =============================================================================
+#
+#  OpenToonz for Android - build and test.
+#
+#  This workflow is MANUAL ONLY: it runs exclusively when someone starts it
+#  from the Actions tab (or with `gh workflow run`).  It deliberately has no
+#  push, pull_request or schedule trigger, so it never runs automatically on
+#  commits - a full Android build takes a long time and is not something every
+#  contribution should pay for.
+#
+#      gh workflow run workflow_android.yml -f abi=arm64-v8a
+#
+#  It performs two independent jobs:
+#
+#    * `gl-compat-test` builds and runs the host smoke test of the OpenGL ES
+#      compatibility layer.  It takes about a minute and verifies the parts of
+#      the shim that carry real algorithmic responsibility (the GLU
+#      tessellator and the projection maths) without needing a device.
+#
+#    * `android` cross compiles the application with the Android NDK and the Qt
+#      for Android kit, and packages the APK.
+#
+# =============================================================================
+
+name: Android
+
+on:
+  # Manual trigger only.  There is intentionally no push / pull_request /
+  # schedule entry here: see the note above.
+  workflow_dispatch:
+    inputs:
+      abi:
+        description: 'Target ABI'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86_64
+      qt_android_version:
+        description: 'Qt for Android version'
+        required: true
+        default: '5.15.2'
+        type: string
+      build_type:
+        description: 'CMake build type'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+          - RelWithDebInfo
+      package_apk:
+        description: 'Package the APK (needs the Android SDK)'
+        required: true
+        default: true
+        type: boolean
+
+# Only one Android build at a time: the Qt kit download and the native build
+# are both heavy, and concurrent runs would only slow each other down.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  QT_ANDROID_VERSION: ${{ inputs.qt_android_version }}
+  QT_ANDROID_DIR: ${{ github.workspace }}/Qt/${{ inputs.qt_android_version }}/android
+  ANDROID_NDK_VERSION: '25.2.9519653'
+  ANDROID_API_LEVEL: '24'
+  BUILD_DIR: ${{ github.workspace }}/build-android
+
+jobs:
+  # ---------------------------------------------------------------------------
+  #  The compatibility layer is the piece of the port that replaces real
+  #  functionality (GLU tessellation, the fixed function pipeline), so it is
+  #  verified on every manual run, on the host, in a minute.
+  # ---------------------------------------------------------------------------
+  gl-compat-test:
+    name: GL compatibility layer (host test)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          cmake -S toonz/sources/android/gl_compat/test \
+                -B build/gl_compat_test \
+                -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/gl_compat_test --parallel
+
+      - name: Run
+        run: ./build/gl_compat_test/ot_gl_compat_test
+
+  # ---------------------------------------------------------------------------
+  #  Cross compilation of the application.
+  # ---------------------------------------------------------------------------
+  android:
+    name: Android ${{ inputs.abi }} (${{ inputs.build_type }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -- Java / Android SDK and NDK -------------------------------------
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up the Android SDK
+        if: ${{ inputs.package_apk }}
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-33 build-tools;33.0.2'
+
+      - name: Install the NDK
+        run: |
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          yes | "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" \
+                --install "ndk;${ANDROID_NDK_VERSION}" || true
+
+      # -- Qt for Android --------------------------------------------------
+      #
+      # The Qt installer is an interactive GUI application; the aqtinstall
+      # project is the supported way to fetch a kit non interactively.
+      - name: Cache the Qt for Android kit
+        id: qt-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/Qt
+          key: qt-android-${{ inputs.qt_android_version }}-${{ runner.os }}
+
+      - name: Install Qt for Android
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install aqtinstall
+          # "desktop" carries the host tools (moc, rcc, lrelease) that a cross
+          # build needs; "android" carries the target libraries, one directory
+          # per ABI.
+          python3 -m aqt install-qt linux desktop \
+              "${{ inputs.qt_android_version }}" linux_gcc_64 \
+              -O "${{ github.workspace }}/Qt"
+          python3 -m aqt install-qt linux android \
+              "${{ inputs.qt_android_version }}" android \
+              --architectures "${{ inputs.abi }}" \
+              -O "${{ github.workspace }}/Qt"
+
+      # -- Build tools -----------------------------------------------------
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              cmake ninja-build pkg-config
+
+      - name: Show the toolchain versions
+        run: |
+          cmake --version
+          "${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++" --version | head -n 1
+
+      # -- Configure --------------------------------------------------------
+      - name: Configure the Android build
+        run: |
+          cmake -S toonz/sources -B "${BUILD_DIR}" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ inputs.abi }}" \
+            -DANDROID_PLATFORM="android-${ANDROID_API_LEVEL}" \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE="${{ inputs.build_type }}" \
+            -DCMAKE_PREFIX_PATH="${{ github.workspace }}/Qt/${{ inputs.qt_android_version }}/android" \
+            -DQt5_DIR="${{ github.workspace }}/Qt/${{ inputs.qt_android_version }}/android/lib/cmake/Qt5" \
+            -DWITH_TRANSLATION=OFF \
+            -DWITH_CANON=OFF
+
+      # -- Build ------------------------------------------------------------
+      - name: Build
+        run: cmake --build "${BUILD_DIR}" --parallel "$(nproc)"
+
+      # -- Package ----------------------------------------------------------
+      - name: Point Gradle at the local.properties SDK
+        if: ${{ inputs.package_apk }}
+        run: |
+          # The Android Gradle plugin reads the SDK location from
+          # local.properties when it is not given the ANDROID_HOME variable.
+          echo "sdk.dir=${ANDROID_SDK_ROOT}" \
+              > toonz/sources/android/gradle/local.properties
+
+      - name: Stage the native libraries
+        run: |
+          mkdir -p toonz/sources/android/gradle/app/src/main/jniLibs/${{ inputs.abi }}
+          cp "${BUILD_DIR}"/lib/*.so \
+             toonz/sources/android/gradle/app/src/main/jniLibs/${{ inputs.abi }}/
+          ls -la toonz/sources/android/gradle/app/src/main/jniLibs/${{ inputs.abi }}
+
+      - name: Stage the Qt runtime
+        run: |
+          # The Qt for Android deployment tool copies the Qt libraries the
+          # application actually uses into the APK.
+          QT_LIB_DIR="${{ github.workspace }}/Qt/${{ inputs.qt_android_version }}/android/lib"
+          mkdir -p toonz/sources/android/gradle/app/src/main/jniLibs/${{ inputs.abi }}
+          for lib in libQt5Core libQt5Gui libQt5Widgets libQt5Network \
+                     libQt5OpenGL libQt5Svg libQt5Xml libQt5Script \
+                     libQt5Multimedia libQt5MultimediaWidgets libQt5PrintSupport \
+                     libQt5Concurrent libQt5Sql libQt5DBus libQt5Designer libQt5UiTools; do
+            if [ -f "${QT_LIB_DIR}/${lib}.so" ]; then
+              cp "${QT_LIB_DIR}/${lib}.so" \
+                 toonz/sources/android/gradle/app/src/main/jniLibs/${{ inputs.abi }}/
+            fi
+          done
+
+      - name: Stage the "stuff" assets
+        run: |
+          # The working tree is unpacked from the APK assets on first run; see
+          # AndroidStorage.ensureAssetsExtracted().
+          mkdir -p toonz/sources/android/gradle/app/src/main/assets
+          cp -r stuff toonz/sources/android/gradle/app/src/main/assets/
+
+      - name: Set up Gradle
+        if: ${{ inputs.package_apk }}
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
+
+      - name: Build the APK
+        if: ${{ inputs.package_apk }}
+        working-directory: toonz/sources/android/gradle
+        run: |
+          gradle --no-daemon assemble${{ inputs.build_type == 'Debug' && 'Debug' || 'Release' }} \
+                 -Pandroid.injected.build.abi=${{ inputs.abi }}
+
+      - name: Upload the APK
+        if: ${{ inputs.package_apk }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenToonz-android-${{ inputs.abi }}-${{ inputs.build_type }}
+          path: toonz/sources/android/gradle/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+
+      # The libraries are uploaded even when the APK packaging is skipped: they
+      # are what an integrator needs to embed the build in another project.
+      - name: Upload the native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenToonz-native-${{ inputs.abi }}
+          path: |
+            ${{ env.BUILD_DIR }}/lib/*.so
+          if-no-files-found: error
+
+      - name: Upload the build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeOutput.log
+            ${{ env.BUILD_DIR }}/CMakeFiles/CMakeError.log
+          if-no-files-found: ignore

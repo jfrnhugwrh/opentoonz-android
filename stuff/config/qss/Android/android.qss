@@ -1,0 +1,142 @@
+/* ===========================================================================
+ *
+ *  OpenToonz for Android - touch oriented user interface.
+ *
+ *  The desktop stylesheets size their controls for a mouse: 13 pixel fonts,
+ *  20 pixel icons, narrow scrollbars and thin separators.  On a phone or a
+ *  tablet those are below the minimum size a finger can hit reliably, so this
+ *  sheet keeps the desktop look and raises the metrics:
+ *
+ *    * every interactive control is at least 48 dp high;
+ *    * scrollbars are wide enough to be dragged;
+ *    * splitters between panels are grabbable;
+ *    * combo boxes and spin boxes open a touch friendly popup.
+ *
+ *  Colours, icons and the panel structure are inherited from the Default
+ *  stylesheet, because this file is loaded as an *additional* stylesheet.
+ *
+ * =========================================================================== */
+
+QWidget {
+    font-size: 14px;
+}
+
+QToolButton {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 4px;
+    border-radius: 6px;
+}
+
+QPushButton {
+    min-height: 44px;
+    padding: 6px 14px;
+    border-radius: 6px;
+}
+
+QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {
+    min-height: 40px;
+    padding: 2px 6px;
+}
+
+QCheckBox, QRadioButton {
+    min-height: 44px;
+    spacing: 10px;
+}
+
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 24px;
+    height: 24px;
+}
+
+QTabBar::tab {
+    min-height: 44px;
+    min-width: 64px;
+    padding: 6px 12px;
+}
+
+QScrollBar:vertical {
+    width: 18px;
+    margin: 0;
+}
+
+QScrollBar:horizontal {
+    height: 18px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    min-height: 48px;
+    border-radius: 9px;
+}
+
+QScrollBar::handle:horizontal {
+    min-width: 48px;
+    border-radius: 9px;
+}
+
+/* Panels are resized by dragging the splitter: it needs a real touch target. */
+QSplitter::handle {
+    background-color: rgba(128, 128, 128, 0.35);
+}
+
+QSplitter::handle:horizontal {
+    width: 12px;
+}
+
+QSplitter::handle:vertical {
+    height: 12px;
+}
+
+QListWidget::item, QTreeWidget::item, QTableWidget::item {
+    min-height: 44px;
+}
+
+QMenu::item {
+    min-height: 44px;
+    padding: 6px 20px;
+}
+
+/* --- the touch command bar ------------------------------------------------ */
+
+#AndroidCommandBar {
+    background-color: #2b2b2b;
+    border-bottom: 1px solid #1a1a1a;
+}
+
+#AndroidCommandBar QToolButton {
+    color: #e8e8e8;
+    background-color: #3a3a3a;
+    border: 1px solid #4a4a4a;
+}
+
+#AndroidCommandBar QToolButton:pressed {
+    background-color: #d98d43;
+    color: #101010;
+}
+
+#AndroidTouchPanel {
+    background-color: #2b2b2b;
+    border-top: 1px solid #1a1a1a;
+}
+
+#AndroidTouchPanel QToolButton {
+    color: #e8e8e8;
+    background-color: #3a3a3a;
+    border: 1px solid #4a4a4a;
+    font-size: 12px;
+}
+
+#AndroidTouchPanel QToolButton:checked {
+    background-color: #d98d43;
+    color: #101010;
+}
+
+#AndroidCommandSheet {
+    background-color: #262626;
+    border-top: 2px solid #d98d43;
+}
+
+#AndroidCommandList::item {
+    min-height: 48px;
+}

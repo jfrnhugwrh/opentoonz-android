@@ -2,6 +2,12 @@
 
 #include "tpanels.h"
 
+#ifdef ANDROID
+// Touch oriented user interface, built only for Android.
+#include "androidtouchpanel.h"
+#include "androidcommandbar.h"
+#endif
+
 // Tnz6 includes
 #include "pane.h"
 #include "viewerpane.h"
@@ -1006,6 +1012,60 @@ CommandBarPanel::CommandBarPanel(QWidget *parent)
   setIsMaximizable(false);
   setFixedHeight(36);
 }
+
+#ifdef ANDROID
+//=============================================================================
+//  AndroidTouchPanel - host panel of the touch oriented controls
+//-----------------------------------------------------------------------------
+
+class AndroidTouchPanelHost final : public TPanel {
+public:
+  AndroidTouchPanelHost(QWidget *parent)
+      : TPanel(parent, Qt::WindowFlags(), TDockWidget::horizontal) {
+    setWidget(new AndroidTouchPanel(this));
+    setIsMaximizable(false);
+    // The strip has to stay a fixed, thumb sized height whatever the room
+    // layout says.
+    setFixedHeight(qMax(AndroidUi::TouchTargetSize + 16, 64));
+  }
+};
+
+class AndroidTouchPanelFactory final : public TPanelFactory {
+public:
+  AndroidTouchPanelFactory() : TPanelFactory("AndroidTouchPanel") {}
+  TPanel *createPanel(QWidget *parent) override {
+    TPanel *panel = new AndroidTouchPanelHost(parent);
+    panel->setObjectName(getPanelType());
+    return panel;
+  }
+  void initialize(TPanel *panel) override {}
+} androidTouchPanelFactory;
+
+//=============================================================================
+//  AndroidCommandBarHost - the touch replacement of the desktop menu bar
+//-----------------------------------------------------------------------------
+
+class AndroidCommandBarHost final : public TPanel {
+public:
+  AndroidCommandBarHost(QWidget *parent)
+      : TPanel(parent, Qt::WindowFlags(), TDockWidget::horizontal) {
+    setWidget(new AndroidCommandBar(this));
+    setIsMaximizable(false);
+    setFixedHeight(qMax(AndroidUi::TouchTargetSize + 16, 64));
+  }
+};
+
+class AndroidCommandBarFactory final : public TPanelFactory {
+public:
+  AndroidCommandBarFactory() : TPanelFactory("AndroidCommandBar") {}
+  TPanel *createPanel(QWidget *parent) override {
+    TPanel *panel = new AndroidCommandBarHost(parent);
+    panel->setObjectName(getPanelType());
+    return panel;
+  }
+  void initialize(TPanel *panel) override {}
+} androidCommandBarFactory;
+#endif  // ANDROID
 
 class CommandBarFactory final : public TPanelFactory {
 public:

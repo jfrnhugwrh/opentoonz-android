@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The application draws its own user interface, so the platform theme only
+      has to stay out of the way: no action bar, a dark background to avoid a
+      bright flash before the first frame is rendered, and the window sized to
+      the whole display.
+    -->
+    <style name="OpenToonzTheme" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <item name="android:windowContentTransitions">false</item>
+        <item name="android:colorAccent">#FFB265</item>
+    </style>
+</resources>

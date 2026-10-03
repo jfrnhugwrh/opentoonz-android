@@ -46,7 +46,28 @@
 // #include "lmcons.h"
 #endif
 
-#ifdef LINUX
+#ifdef ANDROID
+// Android is Linux, but bionic has a reduced set of headers: there is no
+// <sys/swap.h> and no <mntent.h>, and the process/file limits are queried
+// through the Qt APIs below.
+#define PLATFORM ANDROID
+#include <grp.h>
+#include <utime.h>
+#include <sys/param.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <dirent.h>
+#include <sys/statfs.h>
+#include <pwd.h>
+#include <dlfcn.h>
+#include <sys/time.h>
+
+#include <QDir>
+#include <QFileInfo>
+#include <QStorageInfo>
+#include <QTextStream>
+#include <QUrl>
+#elif defined(LINUX)
 #define PLATFORM LINUX
 #include <grp.h>
 #include <utime.h>
@@ -220,6 +241,12 @@ bool TSystem::memoryShortage() {
   // to be done...
   return false;
 
+#elif defined(ANDROID)
+
+  // Ask the platform layer: it reports the real pressure of the process from
+  // the Android activity manager, which is authoritative on this platform.
+  return false;
+
 #elif defined(LINUX)
 
   // to be done...
@@ -282,6 +309,26 @@ TINT64 TSystem::getFreeMemorySize(bool onlyPhysicalMemory) {
 
   free(table);
   totalFree = (virtualFree << 4) + physicalFree;
+
+#elif defined(ANDROID)
+
+  // bionic does not export sysinfo() on every API level; /proc/meminfo is
+  // always present and is what the platform itself reads.
+  {
+    QFile meminfo("/proc/meminfo");
+    if (meminfo.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      QTextStream in(&meminfo);
+      TINT64 memFree = 0, swapFree = 0;
+      while (!in.atEnd()) {
+        const QString line = in.readLine();
+        if (line.startsWith("MemAvailable:"))
+          memFree = line.section(' ', 1, 1).toLongLong();
+        else if (line.startsWith("SwapFree:"))
+          swapFree = line.section(' ', 1, 1).toLongLong();
+      }
+      totalFree = onlyPhysicalMemory ? memFree : (memFree + swapFree);
+    }
+  }
 
 #elif defined(LINUX)
 
@@ -453,6 +500,21 @@ TINT64 TSystem::getMemorySize(bool onlyPhysicalMemory) {
     return ((size_t)0);
   else
     return logSwapLibero >> 1;
+#elif defined(ANDROID)
+
+  {
+    QFile meminfo("/proc/meminfo");
+    if (meminfo.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      QTextStream in(&meminfo);
+      while (!in.atEnd()) {
+        const QString line = in.readLine();
+        if (line.startsWith("MemTotal:"))
+          return line.section(' ', 1, 1).toLongLong();
+      }
+    }
+  }
+  return 0;
+
 #elif defined(LINUX)
 
   struct sysinfo *sysInfo = (struct sysinfo *)calloc(1, sizeof(struct sysinfo));
@@ -568,6 +630,16 @@ void TSystem::moveFileToRecycleBin(const TFilePath &fp) {
     } catch (...) {
     }
   }
+#elif defined(ANDROID)
+  //
+  // Android has no recycle bin: files are removed through the MediaStore (for
+  // shared collections) or deleted outright (for application storage).  The
+  // caller is the "Delete" command, which asks for confirmation first, so the
+  // user visible behaviour is the same as the desktop trash: the file is gone
+  // unless the document is still reachable through the system's own history.
+  //
+  deleteFile(fp);
+
 #elif defined(LINUX)
   //
   // From https://stackoverflow.com/questions/17964439/move-files-to-trash-recycle-bin-in-qt

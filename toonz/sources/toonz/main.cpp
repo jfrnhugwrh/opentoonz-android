@@ -3,6 +3,10 @@
 // Tnz6 includes
 #include "crashhandler.h"
 #include "mainwindow.h"
+
+#ifdef ANDROID
+#include "otandroid.h"
+#endif
 #include "flipbook.h"
 #include "tapp.h"
 #include "iocommand.h"
@@ -332,7 +336,23 @@ int main(int argc, char *argv[]) {
   // constructed. Available from Qt 5.6.
   QApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 
+#ifdef ANDROID
+  // Touch devices have no mouse: the cursor is only used as a drawing hint, so
+  // the pixmap variant is not needed and every widget interaction must accept
+  // touch input.
+  QApplication::setAttribute(Qt::AA_SynthesizeMouseForUnhandledTouchEvents,
+                             true);
+#endif
+
   QApplication a(argc, argv);
+
+#ifdef ANDROID
+  // Bring the platform layer up before anything touches the file system: it
+  // creates the application storage layout and unpacks the bundled "stuff"
+  // tree on first run, which is what TEnv::initUserStuffDir() then points the
+  // environment at.
+  otandroid::initialize();
+#endif
 
 #ifdef MACOSX
   // This workaround is to avoid missing left button problem on Qt5.6.0.
@@ -468,12 +488,27 @@ int main(int argc, char *argv[]) {
   }
 #ifdef _WIN32
   QFont font("Segoe UI", -1);
+#elif defined(ANDROID)
+  // Android has no Helvetica: Roboto is the platform face and is the closest
+  // equivalent of what the desktop builds use.  The point size is expressed in
+  // device independent pixels so that the interface scales with the screen
+  // density, as the platform expects.
+  QFont font("Roboto", -1);
+  font.setPixelSize(14);
+  font.setWeight(QFont::Normal);
+  a.setFont(font);
+  a.setStyle("Fusion");
 #else
   QFont font("Helvetica", -1);
 #endif
+#ifdef ANDROID
+  // Skip the desktop splash: the activity already shows a themed window and
+  // the first frame follows within a moment.
+#else
   font.setPixelSize(13);
   font.setWeight(50);
   a.setFont(font);
+#endif
 
   QString offsetStr("\n\n\n\n\n\n\n\n");
 
@@ -492,13 +527,32 @@ int main(int argc, char *argv[]) {
   a.processEvents();
 
   // OpenGL
+#ifdef ANDROID
+  // The desktop build selects a QGLFormat here; on Android the surface format
+  // is the one OpenGL ES requires and Qt configures it from the manifest
+  // (android:glEsVersion) and the widget's own format.  An alpha buffer and a
+  // stencil buffer are still requested, because the vector renderer and the
+  // style editor rely on both.
+  QSurfaceFormat esFormat = QSurfaceFormat::defaultFormat();
+  esFormat.setAlphaBufferSize(8);
+  esFormat.setStencilBufferSize(8);
+  esFormat.setDepthBufferSize(24);
+  esFormat.setRenderableType(QSurfaceFormat::OpenGLES);
+  QSurfaceFormat::setDefaultFormat(esFormat);
+#else
   QGLFormat fmt;
   fmt.setAlpha(true);
   fmt.setStencil(true);
   QGLFormat::setDefaultFormat(fmt);
+#endif
 
 #ifndef __HAIKU__
+#ifndef ANDROID
+  // There is no GLUT on Android; the fixed function entry points it is used
+  // for are provided by the OpenGL ES compatibility layer instead, so no
+  // initialisation is required.
   glutInit(&argc, argv);
+#endif
 #endif
 
   splash.showMessage(offsetStr + "Initializing Toonz environment ...",
@@ -637,7 +691,13 @@ int main(int argc, char *argv[]) {
   a.processEvents();
 
   // stile
+#ifdef ANDROID
+  // The "windows" style is a desktop look; Fusion is the Qt style that adapts
+  // to the platform palette and to touch sized controls.
+  QApplication::setStyle("Fusion");
+#else
   QApplication::setStyle("windows");
+#endif
 
   IconGenerator::setFilmstripIconSize(Preferences::instance()->getIconSize());
 

@@ -170,6 +170,8 @@ protected slots:
 
 //-----------------------------------------------------------------------------
 
+class AndroidCommandBar;
+
 class TopBar final : public QToolBar {
   Q_OBJECT
 
@@ -177,6 +179,19 @@ class TopBar final : public QToolBar {
   RoomTabWidget *m_roomTabBar;
   StackedMenuBar *m_stackedMenuBar;
   QCheckBox *m_lockRoomCB;
+
+#ifdef ANDROID
+  //! Touch replacement of the menu bar.  The desktop widgets above are still
+  //! created - they own the room list and the menu bars - but stay hidden:
+  //! a menu bar is not usable without a pointer.
+  AndroidCommandBar *m_androidBar;
+#endif
+
+#ifdef ANDROID
+private slots:
+  //! Re-reads the rooms and the commands of the current room.
+  void refreshAndroidBar();
+#endif
 
 public:
   TopBar(QWidget *parent);

@@ -37,8 +37,23 @@ class DVAPI TFileStatus {
   bool m_exist;
   QFileInfo m_fileInfo;
 
+#ifdef ANDROID
+  // Documents reached through the Storage Access Framework have no QFileInfo
+  // backing: their attributes are reported by the platform layer, and are
+  // cached here so that the query is only performed once.
+  bool m_isSaf = false;
+  bool m_isDir = false;
+#endif
+
 public:
   TFileStatus(const TFilePath &path);
+#ifdef ANDROID
+  //! Marks the instance as describing a Storage Access Framework document.
+  void markSaf(bool isDirectory) {
+    m_isSaf = true;
+    m_isDir = isDirectory;
+  }
+#endif
   QString getGroup() const;
   QString getUser() const;
   TINT64 getSize() const;

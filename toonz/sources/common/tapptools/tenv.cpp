@@ -11,6 +11,10 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#ifdef ANDROID
+#include "otandroid.h"
+#endif
+
 #include <iostream>
 
 #ifdef LEVO_MACOSX
@@ -84,6 +88,13 @@ public:
     return QString::fromStdString(getApplicationFileName()) + QString(".app") +
            QString("/Contents/Resources/SystemVar.ini");
 #elif defined(HAIKU)
+    return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) +
+           "/SystemVar.ini";
+#elif defined(ANDROID)
+    // Android: the configuration lives in the application's private storage.
+    // ~/.config does exist from the process point of view but is shared with
+    // every other application of the same user, which is not where a Qt
+    // application keeps its settings on this platform.
     return QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) +
            "/SystemVar.ini";
 #else /* Generic Unix */
@@ -699,7 +710,33 @@ void writeRootVar(EnvGlobals *eg, const TFilePath &userStuffDir) {
 #endif
 
 void TEnv::initUserStuffDir() {
-#if !defined(_WIN32) && !defined(MACOSX)
+#ifdef ANDROID
+  // Android: the APK is not a directory tree, so the working root cannot be
+  // derived from the executable path.  The platform layer unpacks the bundled
+  // "stuff" tree into the application storage on first run and hands the
+  // location over here; the environment is then pointed at it, which is what
+  // the desktop installations do through the installer.
+  {
+    EnvGlobals *eg = EnvGlobals::instance();
+    if (!otandroid::isAvailable()) return;
+    if (eg->getArgPathValue(eg->getRootVarName()) != "") return;
+
+    otandroid::ensureStuffExtracted();
+    const TFilePath stuffRoot = otandroid::getStuffRoot();
+    if (stuffRoot.isEmpty()) return;
+
+    eg->setStuffDir(stuffRoot);
+
+    // Persist the root so that the paths resolved by TEnv::getSystemVarValue()
+    // agree with the one just configured, exactly as the first-run seeding
+    // does on the other platforms.
+    QSettings settings(eg->getSystemVarFile(), QSettings::IniFormat);
+    settings.setValue(QString::fromStdString(eg->getRootVarName()),
+                      stuffRoot.getQString());
+    settings.sync();
+  }
+#endif
+#if !defined(_WIN32) && !defined(MACOSX) && !defined(ANDROID)
   EnvGlobals *eg = EnvGlobals::instance();
 
   // portable builds carry their own stuff; nothing to seed

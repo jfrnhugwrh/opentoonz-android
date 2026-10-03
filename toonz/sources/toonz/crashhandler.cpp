@@ -9,11 +9,17 @@
 #include <dbghelp.h>
 #include <psapi.h>
 #else
-#include <execinfo.h>
 #include <signal.h>
 #include <unistd.h>
+#if defined(__ANDROID__)
+// bionic has no <execinfo.h>: the backtrace is reported by the platform crash
+// reporter (which stores it in the same crash folder, see getCrashReportFolder).
+#include <android/log.h>
+#else
+#include <execinfo.h>
 #include <err.h>
 #include <regex>
+#endif
 #endif
 
 #include "tgl.h"
@@ -361,6 +367,7 @@ static bool sh(std::string &out, const char *cmd) {
 
 //-----------------------------------------------------------------------------
 
+#if !defined(__ANDROID__)
 static bool addr2line(std::string &out, const char *exepath, const char *addr) {
   char cmd[512];
 #ifdef MACOSX
@@ -370,6 +377,7 @@ static bool addr2line(std::string &out, const char *exepath, const char *addr) {
 #endif
   return sh(out, cmd);
 }
+#endif  // !__ANDROID__
 
 //-----------------------------------------------------------------------------
 
@@ -383,6 +391,18 @@ static void printTabletInfo(std::string &out) {}
 
 //-----------------------------------------------------------------------------
 
+#if defined(__ANDROID__)
+// bionic does not provide the execinfo API.  The native crash reporter
+// (debuggerd) already records a full tombstone for every fatal signal, and the
+// unwinder required to symbolicate in process is not part of the NDK, so the
+// report points at the platform's own record instead of duplicating it.
+static void printBacktrace(std::string &out) {
+  out.append(
+      "Backtrace: see the native crash report produced by the platform\n"
+      "           (adb logcat -b crash, or /data/tombstones on a rooted "
+      "device)\n");
+}
+#else
 #define HAS_BACKTRACE
 static void printBacktrace(std::string &out) {
   int frameStack = 0;
@@ -428,6 +448,7 @@ static void printBacktrace(std::string &out) {
 
   free(bts);
 }
+#endif  // !__ANDROID__
 
 void signalHandler(int sig) {
   static volatile bool handling = false;

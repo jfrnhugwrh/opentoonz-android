@@ -19,7 +19,13 @@
 #endif
 #endif
 
-#if defined(MACOSX) || defined(LINUX) || defined(FREEBSD) || defined(HAIKU)
+#if defined(ANDROID)
+// QGLContext is the deprecated Qt4 style context and has no meaningful
+// implementation on Android; the current context is tracked through
+// QOpenGLContext instead.
+#include <QOpenGLContext>
+#include <QThread>
+#elif defined(MACOSX) || defined(LINUX) || defined(FREEBSD) || defined(HAIKU)
 #include <QGLContext>
 #endif
 
@@ -597,6 +603,26 @@ void tglMakeCurrent(TGlContext context) {
 }
 
 void tglDoneCurrent(TGlContext) { wglMakeCurrent(NULL, NULL); }
+
+#elif defined(ANDROID)
+
+// Android keeps one current context per rendering thread; that is exactly what
+// QOpenGLContext::currentContext() reports for the calling thread.
+TGlContext tglGetCurrentContext() {
+  return reinterpret_cast<TGlContext>(QOpenGLContext::currentContext());
+}
+
+void tglMakeCurrent(TGlContext context) {
+  QOpenGLContext *ctx = reinterpret_cast<QOpenGLContext *>(context);
+  if (ctx && ctx->surface())
+    ctx->makeCurrent(ctx->surface());
+  else
+    tglDoneCurrent(tglGetCurrentContext());
+}
+
+void tglDoneCurrent(TGlContext context) {
+  if (context) reinterpret_cast<QOpenGLContext *>(context)->doneCurrent();
+}
 
 #elif defined(LINUX) || defined(FREEBSD) || defined(__sgi) || defined(MACOSX) || defined(HAIKU)
 

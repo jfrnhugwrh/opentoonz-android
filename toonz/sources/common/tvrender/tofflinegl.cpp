@@ -11,7 +11,14 @@
 #include "trop.h"
 
 // Platform-specific includes
-#if defined(LINUX) || defined(FREEBSD)
+#if defined(ANDROID)
+
+// Android has no X server and no GLX: the offline contexts are created
+// through the Qt offscreen surface / framebuffer object implementation, which
+// is what the ES driver supports.
+#include "qtofflinegl.h"
+
+#elif defined(LINUX) || defined(FREEBSD)
 
 #include "qtofflinegl.h"
 #include <X11/Xlib.h>
@@ -317,6 +324,16 @@ static std::shared_ptr<TOfflineGL::Imp> defaultOfflineGLGenerator(
 // XImplementation : implementazione offlineGL  Server X (MACOSX & LINUX & BSD)
 //-----------------------------------------------------------------------------
 
+#elif defined(ANDROID)
+
+// Android: the Qt offscreen implementation is the only one available (see
+// qtofflinegl.cpp, which creates a QOpenGLContext on a QOffscreenSurface and
+// renders into a framebuffer object).
+static std::shared_ptr<TOfflineGL::Imp> defaultOfflineGLGenerator(
+    const TDimension &dim, std::shared_ptr<TOfflineGL::Imp> shared) {
+  return std::make_shared<QtOfflineGL>(dim, shared);
+}
+
 #elif defined(LINUX) || defined(FREEBSD)
 namespace {
 // The XScopedLock stuff doesn't seem finished,
@@ -550,7 +567,7 @@ public:
 //--------------------------------------------------
 
 TOfflineGL::TOfflineGL(TDimension dim, const TOfflineGL *shared) : m_imp(0) {
-#if defined(LINUX) || defined(FREEBSD)
+#if defined(LINUX) || defined(FREEBSD) && !defined(ANDROID)
   QMutexLocker locker(&linuxImpMutex);
 #endif
 
@@ -568,7 +585,7 @@ TOfflineGL::TOfflineGL(TDimension dim, const TOfflineGL *shared) : m_imp(0) {
 //-----------------------------------------------------------------------------
 
 TOfflineGL::TOfflineGL(const TRaster32P &raster, const TOfflineGL *shared) {
-#if defined(LINUX) || defined(FREEBSD)
+#if defined(LINUX) || defined(FREEBSD) && !defined(ANDROID)
   QMutexLocker locker(&linuxImpMutex);
 #endif
 

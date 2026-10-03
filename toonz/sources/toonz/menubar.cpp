@@ -3,6 +3,11 @@
 #include "menubar.h"
 #include "customhelplink.h"
 
+#ifdef ANDROID
+#include "androidcommandbar.h"
+#include "androidtouchpanel.h"
+#endif
+
 // Tnz6 includes
 #include "menubarcommandids.h"
 #include "tapp.h"
@@ -1236,7 +1241,11 @@ QMenuBar *StackedMenuBar::createFullMenuBar() {
   }
   fileMenu->addSeparator();
   addMenuItem(fileMenu, MI_PrintXsheet);
+#ifndef ANDROID
+  // No Print Support on Android: the action is not registered at all, so
+  // nothing is added to the menu.  The PDF export is unchanged.
   addMenuItem(fileMenu, MI_Print);
+#endif
   addMenuItem(fileMenu, MI_Export);
   fileMenu->addSeparator();
   QMenu *scriptMenu = fileMenu->addMenu(tr("Script"));
@@ -1707,6 +1716,39 @@ TopBar::TopBar(QWidget *parent) : QToolBar(parent) {
   m_containerFrame->setLayout(mainLayout);
   addWidget(m_containerFrame);
 
+#ifdef ANDROID
+  // ---------------------------------------------------------------------
+  //  Touch layout
+  //
+  //  A phone has no room for a menu bar next to the room tabs, and neither can
+  //  be operated with a finger.  The command bar replaces both: it exposes the
+  //  commands of the current room through a searchable sheet, and the rooms
+  //  through a picker.  The desktop widgets are kept alive - the room tab bar
+  //  owns the room list and the stacked menu bar owns the menus the commands
+  //  are read from - but they are not shown.
+  // ---------------------------------------------------------------------
+  AndroidUi::applyTouchTheme();
+
+  m_containerFrame->hide();
+
+  m_androidBar = new AndroidCommandBar(this);
+  addWidget(m_androidBar);
+
+  connect(m_roomTabBar, SIGNAL(currentChanged(int)), this,
+          SLOT(refreshAndroidBar()));
+  connect(m_roomTabBar, SIGNAL(insertNewTabRoom()), this,
+          SLOT(refreshAndroidBar()));
+  connect(m_roomTabBar, SIGNAL(deleteTabRoom(int)), this,
+          SLOT(refreshAndroidBar()));
+  connect(m_roomTabBar, SIGNAL(renameTabRoom(int, const QString)), this,
+          SLOT(refreshAndroidBar()));
+
+  connect(m_androidBar, &AndroidCommandBar::roomRequested, this,
+          [this](int index) { m_roomTabBar->setCurrentIndex(index); });
+
+  refreshAndroidBar();
+#endif
+
   bool ret = true;
   ret      = ret && connect(m_roomTabBar, SIGNAL(currentChanged(int)),
                             m_stackedMenuBar, SLOT(setCurrentIndex(int)));
@@ -1723,3 +1765,24 @@ TopBar::TopBar(QWidget *parent) : QToolBar(parent) {
                        SLOT(setIsLocked(bool)));
   assert(ret);
 }
+
+#ifdef ANDROID
+
+//-----------------------------------------------------------------------------
+/*! Feeds the touch command bar with the commands of the current room.
+    The command set is taken from the room's own menu bar, so the available
+    commands - and their enabled state - are exactly the desktop ones.
+*/
+void TopBar::refreshAndroidBar() {
+  if (!m_androidBar) return;
+
+  QStringList roomNames;
+  for (int i = 0; i < m_roomTabBar->count(); ++i)
+    roomNames << m_roomTabBar->tabText(i);
+  m_androidBar->setRooms(roomNames, m_roomTabBar->currentIndex());
+
+  QWidget *currentMenu = m_stackedMenuBar->widget(m_roomTabBar->currentIndex());
+  m_androidBar->setSourceMenuBar(qobject_cast<QMenuBar *>(currentMenu));
+}
+
+#endif  // ANDROID
